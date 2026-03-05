@@ -20,6 +20,61 @@ app.use(express.json());
 
 const { Types } = require('mongoose');
 
+let isMigrationDone = false;
+
+// Function to handle database seeding and migrations
+const runMigrations = async () => {
+  if (isMigrationDone) return;
+
+  try {
+    // Seed default admin if no users exist
+    const userCount = await User.countDocuments();
+    if (userCount === 0) {
+      const defaultAdmin = new User({
+        name: "System Admin",
+        email: "admin@nexurah.com",
+        password: "admin", 
+        role: "admin",
+        status: "active"
+      });
+      await defaultAdmin.save();
+      console.log("Default admin account created: admin@nexurah.com / admin");
+    }
+
+    // Basic migrations
+    await User.updateMany({ status: { $exists: false } }, { $set: { status: 'active' } });
+
+    const defaultUser = await User.findOne({ role: 'admin' });
+    if (defaultUser) {
+      await Promise.all([
+        Customer.updateMany({ userId: { $exists: false } }, { $set: { userId: defaultUser._id } }),
+        Loan.updateMany({ userId: { $exists: false } }, { $set: { userId: defaultUser._id } }),
+        Payment.updateMany({ userId: { $exists: false } }, { $set: { userId: defaultUser._id } }),
+        Notification.updateMany({ userId: { $exists: false } }, { $set: { userId: defaultUser._id } }),
+      ]);
+    }
+    isMigrationDone = true;
+    console.log("Migrations and seeding checked/completed.");
+  } catch (err) {
+    console.error("Migration error:", err);
+    // Don't throw here, migrations failing shouldn't necessarily crash the whole app
+  }
+};
+
+// Middleware to ensure database connection
+const dbMiddleware = async (req, res, next) => {
+  try {
+    await initializeDatabase();
+    await runMigrations();
+    next();
+  } catch (err) {
+    console.error("Database connection middleware error:", err);
+    res.status(500).send("Database connection failed. Please check MONGODB_URI.");
+  }
+};
+
+app.use(dbMiddleware);
+
 // Helper to build filter based on userId query param
 const getFilter = async (req) => {
   const { userId } = req.query;
@@ -45,48 +100,6 @@ const getFilter = async (req) => {
 
   return { userId };
 };
-
-// Database Initialization & Migrations
-const startApp = async () => {
-  try {
-    await initializeDatabase();
-
-    // Seed default admin if no users exist
-    const userCount = await User.countDocuments();
-    if (userCount === 0) {
-      const defaultAdmin = new User({
-        name: "System Admin",
-        email: "admin@nexurah.com",
-        password: "admin", // In a real app, use hashing!
-        role: "admin",
-        status: "active"
-      });
-      await defaultAdmin.save();
-      console.log("Default admin account created: admin@nexurah.com / admin");
-    }
-
-    // Ensure all users have a status (migration for existing users)
-    await User.updateMany({ status: { $exists: false } }, { $set: { status: 'active' } });
-
-    // Assign existing records to the first admin if no userId exists (migration)
-    const defaultUser = await User.findOne({ role: 'admin' });
-    if (defaultUser) {
-      await Promise.all([
-        Customer.updateMany({ userId: { $exists: false } }, { $set: { userId: defaultUser._id } }),
-        Loan.updateMany({ userId: { $exists: false } }, { $set: { userId: defaultUser._id } }),
-        Payment.updateMany({ userId: { $exists: false } }, { $set: { userId: defaultUser._id } }),
-        Notification.updateMany({ userId: { $exists: false } }, { $set: { userId: defaultUser._id } }),
-      ]);
-      console.log(`Migration complete. Records assigned to admin (${defaultUser.name}).`);
-    }
-    console.log("Database synchronization complete.");
-  } catch (err) {
-    console.error("Initialization error:", err);
-  }
-};
-
-// Start initialization
-startApp();
 
 // --- Routes ---
 
