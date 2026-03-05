@@ -1,0 +1,10 @@
+node_modules/
+.env
+*.log
+debug_out.txt
+check_result.txt
+chk2.js
+check.js
+dump_data.js
+debug_data.js
+.DS_Store
